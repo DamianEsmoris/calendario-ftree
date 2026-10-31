@@ -23,9 +23,9 @@ TODO: Revisar bien el formato porque me estoy mancando seguro.
 
 # Hitos
 
-- [ ] Implementar el tooling BT en un archivo (tener archivos funcionales , obtener nodo, etc.)
-- [ ] Operaciones comunes BT (insertar, buscar, obtener rango y para no complicar con el borrado únicamente borrar el detalle (cuenta como update))
-- [ ] Hacer API simplona para abstraer el TAD
+- [x] Implementar el tooling BT en un archivo (tener archivos funcionales , obtener nodo, etc.)
+- [x] Operaciones comunes BT (insertar, buscar, obtener rango y para no complicar con el borrado únicamente borrar el detalle (cuenta como update))
+- [x] Hacer API simplona para abstraer el TAD
 - [ ] Digievolución de BT a BST
 - [ ] Hacer una clase de calendario que maneje el CRUD
 - [ ] Endpoints CRUD
