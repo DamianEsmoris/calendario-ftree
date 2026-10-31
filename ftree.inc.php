@@ -19,7 +19,7 @@ class Node
     {
         $this->left = 0;
         $this->right = 0;
-        $this->height = 0;
+        $this->height = 1; 
     }
 
     public function encode(): string
@@ -78,6 +78,11 @@ class Node
     public static function encodeValueField(string $value): string
     {
         return self::strEncode($value);
+    }
+
+    public static function encodeHeightField(int $height): string
+    {
+        return self::intEncode($height);
     }
 
     // little-endian 4-byte uint32
@@ -178,6 +183,12 @@ class FTree
             );
             fseek($this->f, $offset, SEEK_SET);
             fwrite($this->f, $ptrEnc);
+
+            if ($key <= $parent->key) {
+                $parent->left = $ptr;
+            } else {
+                $parent->right = $ptr;
+            }
         // Keep looking for space
         } else {
             $this->_append(
@@ -194,6 +205,9 @@ class FTree
             Node::Height($leftChild)
         );
 
+        $heightOffset = $parentPtr - 1 + Node::PTR_SIZE * 2 + Node::KEY_SIZE;
+        fseek($this->f, $heightOffset, SEEK_SET);
+        fwrite($this->f, Node::encodeHeightField($parent->height));
     }
 
     private function getNodeByPtr(int $ptr): ?Node
@@ -230,17 +244,28 @@ class FTree
             $root = $this->getNodeByPtr($rootPtr);
         }
 
-        $offset = $rootPtr - 1 + Node::KEY_SIZE + Node::PTR_SIZE * 2 + NODE::HEIGHT_SIZE;
+        if (!$root) {
+            return false;
+        }
+
+        $offset = $rootPtr - 1 + Node::KEY_SIZE + Node::PTR_SIZE * 2 + Node::HEIGHT_SIZE;
         fseek($this->f, $offset, SEEK_SET);
         fwrite($this->f, Node::encodeValueField($value));
         return true;
     }
 
-    public function appendOrUpdate(int $key, string $value) {
-        if (!$this->find($key)) {
+    public function appendOrUpdate(int $key, string $value): bool
+    {
+        if ($this->find($key) === null) {
             $this->append($key, $value);
+            return true;
         }
-        $this->update($key, $value);
+        return $this->update($key, $value);
+    }
+
+    public function height(): int
+    {
+        return Node::Height($this->getNodeByPtr(1));
     }
 
     public function find(int $key): ?string

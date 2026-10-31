@@ -98,6 +98,41 @@ function test_update_on_missing_key_returns_false_and_does_not_insert(): void {
     });
 }
 
+function test_update_on_missing_key_in_nonempty_tree_returns_false_and_does_not_corrupt(): void {
+    // Regression: update() used to walk off the end of the tree, land on a
+    // bogus offset, and silently overwrite an unrelated node's value.
+    withTempFTree(function (FTree $ft) {
+        $ft->append(25, 'root');
+        $ft->append(3, 'left child');
+        assertSame(false, $ft->update(999, 'does not exist'));
+        assertSame(['root', 'left child'], [$ft->find(25), $ft->find(3)]);
+    });
+}
+
+function test_appendOrUpdate_inserts_when_missing_and_updates_when_present(): void {
+    withTempFTree(function (FTree $ft) {
+        assertTrue($ft->appendOrUpdate(28, 'un dia cualquiera'));
+        assertSame('un dia cualquiera', $ft->find(28));
+        assertTrue($ft->appendOrUpdate(28, 'mi cumpleanos'));
+        assertSame('mi cumpleanos', $ft->find(28));
+        assertSame(1, count($ft->inOrder()));
+    });
+}
+
+function test_append_persists_height_on_disk(): void {
+    // Regression: _append() computed each parent's new height but never
+    // wrote it back, so the height field stayed 0 forever.
+    withTempFTree(function (FTree $ft) {
+        assertSame(0, $ft->height());
+        $ft->append(25, 'root');
+        assertSame(1, $ft->height());
+        $ft->append(3, 'left child, still height 1 under root');
+        assertSame(2, $ft->height());
+        $ft->append(6, 'right of 3, deepens the left chain');
+        assertSame(3, $ft->height());
+    });
+}
+
 function test_data_survives_reopening_the_same_file(): void {
     $path = tempnam(sys_get_temp_dir(), 'ftree_test_');
     unlink($path);
