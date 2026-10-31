@@ -23,8 +23,8 @@ function test_find_on_empty_tree_returns_null(): void {
 
 function test_append_duplicate_key_updates_in_place_without_adding_a_node(): void {
     withTempFTree(function (FTree $ft) {
-        $ft->append(28, 'un dia cualquiera');
-        $ft->append(28, 'mi cumpleanos');
+        $ft->appendOrUpdate(28, 'un dia cualquiera');
+        $ft->appendOrUpdate(28, 'mi cumpleanos');
         assertSame('mi cumpleanos', $ft->find(28));
         assertSame(1, count($ft->inOrder()));
     });
@@ -130,7 +130,7 @@ function test_findRange_matches_brute_force_on_a_random_tree(): void {
         for ($i = 0; $i < 150; $i++) {
             $k = mt_rand(0, 999);
             $keys[$k] = true;
-            $ft->append($k, "v$k");
+            $ft->appendOrUpdate($k, "v$k");
         }
         $all = array_keys($keys);
         sort($all);
