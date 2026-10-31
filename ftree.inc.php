@@ -3,21 +3,24 @@ const INT_SIZE = 8;
 const CHAR_SIZE = 8;
 const NODE_VALUE_LENGTH = 50;
 
-class Node {
+class Node
+{
     public const PTR_SIZE = INT_SIZE;
     public const KEY_SIZE = INT_SIZE;
-    public const VALUE_SIZE = CHAR_SIZE*NODE_VALUE_LENGTH;
-    public const ENCODED_SIZE = self::KEY_SIZE + self::PTR_SIZE*2 + self::VALUE_SIZE;
+    public const VALUE_SIZE = CHAR_SIZE * NODE_VALUE_LENGTH;
+    public const ENCODED_SIZE = self::KEY_SIZE + self::PTR_SIZE * 2 + self::VALUE_SIZE;
 
     public int $left;
     public int $right;
 
-    public function __construct(public int $key, public string $value) {
+    public function __construct(public int $key, public string $value)
+    {
         $this->left = 0;
         $this->right = 0;
     }
 
-    public function encode(): string {
+    public function encode(): string
+    {
         return implode('', [
             self::intEncode($this->left),
             self::intEncode($this->key),
@@ -26,11 +29,23 @@ class Node {
         ]);
     }
 
-    public static function Decode(string $encodedStr): self {
-        $left = self::intDecode(substr($encodedStr, 0, 8));
-        $key = self::intDecode(substr($encodedStr, 8, 16));
-        $right = self::intDecode(substr($encodedStr, 16, 24));
-        $value = self::strDecode(substr($encodedStr, 24, self::ENCODED_SIZE));
+    public static function Decode(string $encodedStr): self
+    {
+        $f = 0;
+        $t = self::PTR_SIZE;
+        $left = self::intDecode(substr($encodedStr, $f, $t));
+
+        $f = $t;
+        $t += self::KEY_SIZE;
+        $key = self::intDecode(substr($encodedStr, $f, $t));
+
+        $f = $t;
+        $t += self::PTR_SIZE;
+        $right = self::intDecode(substr($encodedStr, $f, $t));
+
+        $f = $t;
+        $t += self::ENCODED_SIZE;
+        $value = self::strDecode(substr($encodedStr, $f, $t));
 
         $n = new Node($key, $value);
         $n->left = $left;
@@ -38,24 +53,29 @@ class Node {
         return $n;
     }
 
-    public static function encodePtr(int $ptr): string {
+    public static function encodePtr(int $ptr): string
+    {
         return self::intEncode($ptr);
     }
 
-    public static function encodeValueField(string $value): string {
+    public static function encodeValueField(string $value): string
+    {
         return self::strEncode($value);
     }
 
     // little-endian 4-byte uint32
-    private static function intEncode(int $x): string {
+    private static function intEncode(int $x): string
+    {
         return bin2hex(pack('V', $x));
     }
 
-    private static function intDecode(string $encoded): int {
+    private static function intDecode(string $encoded): int
+    {
         return unpack('V', hex2bin(substr($encoded, 0, 8)))[1];
     }
 
-    private static function strEncode(string $str): string {
+    private static function strEncode(string $str): string
+    {
         $out = '';
         for ($i = 0; $i < NODE_VALUE_LENGTH; $i++) {
             $out .= self::intEncode($i < strlen($str) ? ord($str[$i]) : 0);
@@ -63,7 +83,8 @@ class Node {
         return $out;
     }
 
-    private static function strDecode(string $encStr): string {
+    private static function strDecode(string $encStr): string
+    {
         $result = '';
         for ($i = 0; $i < strlen($encStr); $i += 8) {
             $charCode = self::intDecode(substr($encStr, $i, 8));
@@ -74,10 +95,12 @@ class Node {
     }
 }
 
-class FTree {
+class FTree
+{
     /** @var resource PHP has no usable `resource` type declaration, so this stays untyped */
     private $f;
-    public function __construct(protected string $filePath) {
+    public function __construct(protected string $filePath)
+    {
         $f = fopen($filePath, 'c+');
         if (!$f) {
             throw new Exception('Access denied (probably)');
@@ -85,23 +108,27 @@ class FTree {
         $this->f = $f;
     }
 
-    public function __destruct() {
+    public function __destruct()
+    {
         if (!$this->f) {
             return;
         }
         fclose($this->f);
     }
 
-    private function getNextPtr(): int {
+    private function getNextPtr(): int
+    {
         clearstatcache();
-        return fstat($this->f)['size']+1;
+        return fstat($this->f)['size'] + 1;
     }
 
-    private function isEmpty(): bool {
+    private function isEmpty(): bool
+    {
         return $this->getNextPtr() == 1;
     }
 
-    public function append(int $key, string $value): void {
+    public function append(int $key, string $value): void
+    {
         if ($this->isEmpty()) {
             $this->pushNode(new Node($key, $value));
             return;
@@ -121,7 +148,7 @@ class FTree {
         // Node's key already exists.
         // Change the value only.
         if ($key == $parent->key) {
-            $offset = $parentPtr - 1 + Node::KEY_SIZE + Node::PTR_SIZE*2;
+            $offset = $parentPtr - 1 + Node::KEY_SIZE + Node::PTR_SIZE * 2;
             fseek($this->f, $offset, SEEK_SET);
             fwrite($this->f, Node::encodeValueField($value));
             return;
@@ -140,7 +167,8 @@ class FTree {
         fwrite($this->f, $ptrEnc);
     }
 
-    private function getNodeByPtr(int $ptr): ?Node {
+    private function getNodeByPtr(int $ptr): ?Node
+    {
         if ($ptr < 1) {
             return null;
         }
@@ -153,12 +181,14 @@ class FTree {
         return Node::Decode($nodeEncoded);
     }
 
-    private function pushNode(Node $node): void {
+    private function pushNode(Node $node): void
+    {
         fseek($this->f, 0, SEEK_END);
         fwrite($this->f, $node->encode(), $node::ENCODED_SIZE);
     }
 
-    public function update(int $key, string $value): bool {
+    public function update(int $key, string $value): bool
+    {
         if ($this->find($key) === null) {
             return false;
         }
@@ -166,7 +196,8 @@ class FTree {
         return true;
     }
 
-    public function find(int $key): ?string {
+    public function find(int $key): ?string
+    {
         if ($this->isEmpty()) {
             return null;
         }
@@ -186,7 +217,8 @@ class FTree {
         return $parent->key === $key ? $parent->value : null;
     }
 
-    public function inOrder(): array {
+    public function inOrder(): array
+    {
         $arr = [];
         foreach ($this->_inOrder($this->getNodeByPtr(1)) as $node) {
             $arr[$node->key] = $node->value;
@@ -195,7 +227,8 @@ class FTree {
     }
 
     /** @return Node[] */
-    private function _inOrder(?Node $root, array $arr = []): array {
+    private function _inOrder(?Node $root, array $arr = []): array
+    {
         if (!$root) {
             return $arr;
         }
@@ -206,7 +239,8 @@ class FTree {
         return $arr;
     }
 
-    public function findRange(int $fromKey, int $toKey): array {
+    public function findRange(int $fromKey, int $toKey): array
+    {
         $arr = [];
         foreach ($this->_findRange($fromKey, $toKey, $this->getNodeByPtr(1)) as $node) {
             $arr[$node->key] = $node->value;
@@ -215,7 +249,8 @@ class FTree {
     }
 
     /** @return Node[] */
-    private function _findRange(int $fromKey, int $toKey, ?Node $root, array $arr = []): array {
+    private function _findRange(int $fromKey, int $toKey, ?Node $root, array $arr = []): array
+    {
         if (!$root) {
             return $arr;
         }
