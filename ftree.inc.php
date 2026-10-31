@@ -14,12 +14,13 @@ class Node
     public int $left;
     public int $right;
     public int $height;
+    public int $ptr;
 
     public function __construct(public int $key, public string $value)
     {
         $this->left = 0;
         $this->right = 0;
-        $this->height = 1; 
+        $this->height = 1;
     }
 
     public function encode(): string
@@ -68,6 +69,10 @@ class Node
             return 0;
         }
         return $node->height;
+    }
+    public static function Balance(?Node $left, ?Node $right): int
+    {
+        return self::Height($left) - self::Height($right);
     }
 
     public static function encodePtr(int $ptr): string
@@ -173,23 +178,14 @@ class FTree
 
         if (!$child) {
             $ptr = $this->getNextPtr();
-            $ptrEnc = Node::encodePtr($ptr);
             $this->pushNode(new Node($key, $value));
-
-            $offset = $parentPtr - 1 + (
-                $key <= $parent->key
-                ? 0
-                : Node::PTR_SIZE + Node::KEY_SIZE
-            );
-            fseek($this->f, $offset, SEEK_SET);
-            fwrite($this->f, $ptrEnc);
-
             if ($key <= $parent->key) {
-                $parent->left = $ptr;
-            } else {
-                $parent->right = $ptr;
+                $this->setNodeLeftPtr($parent, $ptr);
             }
-        // Keep looking for space
+            else {
+                $this->setNodeRightPtr($parent, $ptr);
+            }
+            // Keep looking for space
         } else {
             $this->_append(
                 $key,
@@ -200,14 +196,44 @@ class FTree
 
         $leftChild = $this->getNodeByPtr($parent->left);
         $rightChild = $this->getNodeByPtr($parent->right);
-        $parent->height = 1 + max(
-            Node::Height($rightChild),
-            Node::Height($leftChild)
-        );
 
-        $heightOffset = $parentPtr - 1 + Node::PTR_SIZE * 2 + Node::KEY_SIZE;
-        fseek($this->f, $heightOffset, SEEK_SET);
-        fwrite($this->f, Node::encodeHeightField($parent->height));
+        $this->setNodeHeight($parent, 1 + max(
+            Node::Height($leftChild),
+            Node::Height($rightChild)
+        ));
+
+
+        $parentBalance = Node::Balance($leftChild, $rightChild);
+        $leftChildBalance = $leftChild
+            ? Node::Balance($this->getNodeByPtr($leftChild->left), $this->getNodeByPtr($leftChild->right))
+            : 0;
+        $rightChildBalance = $rightChild
+            ? Node::Balance($this->getNodeByPtr($rightChild->left), $this->getNodeByPtr($rightChild->right))
+            : 0;
+
+        /*
+        // LL
+        if ($parentBalance > 1 && $leftChildBalance >= 0) {
+            $this->antiClockWiseRot($parent);
+        }
+
+        // LR
+        if ($parentBalance > 1 && $leftChildBalance < 0) {
+            $this->antiClockWiseRot($parent);
+            $this->clockWiseRot($parent);
+        }
+
+        // RR
+        if ($parentBalance < -1 && $rightChildBalance >= 0) {
+            $this->clockWiseRot($parent);
+        }
+
+        // RL
+        if ($parentBalance < -1 && $rightChildBalance >= 0) {
+            $this->clockWiseRot($parent);
+            $this->antiClockWiseRot($parent);
+        }
+        */
     }
 
     private function getNodeByPtr(int $ptr): ?Node
@@ -221,7 +247,9 @@ class FTree
         if ($nodeEncoded === false || strlen($nodeEncoded) < Node::ENCODED_SIZE) {
             return null;
         }
-        return Node::Decode($nodeEncoded);
+        $node = Node::Decode($nodeEncoded);
+        $node->ptr = $ptr+1;
+        return $node;
     }
 
     private function pushNode(Node $node): void
@@ -236,21 +264,19 @@ class FTree
             return false;
         }
 
-        $rootPtr = 1;
-        $root = $this->getNodeByPtr($rootPtr);
+        $nodePtr = 1;
+        $node = $this->getNodeByPtr($nodePtr);
 
-        while ($root && $root->key !== $key) {
-            $rootPtr = $key <= $root->key ? $root->left : $root->right;
-            $root = $this->getNodeByPtr($rootPtr);
+        while ($node && $node->key !== $key) {
+            $nodePtr = $key <= $node->key ? $node->left : $node->right;
+            $node = $this->getNodeByPtr($nodePtr);
         }
 
-        if (!$root) {
+        if (!$node) {
             return false;
         }
 
-        $offset = $rootPtr - 1 + Node::KEY_SIZE + Node::PTR_SIZE * 2 + Node::HEIGHT_SIZE;
-        fseek($this->f, $offset, SEEK_SET);
-        fwrite($this->f, Node::encodeValueField($value));
+        $this->setNodeValue($node, $value);
         return true;
     }
 
@@ -350,4 +376,59 @@ class FTree
         }
         return $arr;
     }
-}
+
+    private function clockWiseRot(Node $node)
+    {
+        $node = $this->getNodeByPtr($node->ptr);
+
+        $rightChild = $this->getNodeByPtr($node->right);
+        $rightLeftChild = $rightChild ? $rightChild->left : 0;
+
+        $this->setNodeRightPtr($node, $rightLeftChild);
+        $this->setNodeLeftPtr($node, $node->right);
+    }
+
+    private function antiClockWiseRot(Node $node) {
+        $leftChild = $this->getNodeByPtr($node->left);
+        $leftRightChild = $leftChild ? $leftChild->right : 0;
+
+        $this->setNodeRightPtr($node, $leftRightChild);
+        $this->setNodeLeftPtr($node, $node->right);
+    }
+
+    private function setNodeRightPtr(Node $node, int $value) {
+        $offset = $node->ptr - 1 + Node::PTR_SIZE + Node::KEY_SIZE;
+        $ptrEnc = Node::encodePtr($value);
+        fseek($this->f, $offset, SEEK_SET);
+        fwrite($this->f, $ptrEnc);
+        $node->right = $value;
+    }
+
+    private function setNodeLeftPtr(Node $node, int $value) {
+        $offset = $node->ptr - 1 + 0;
+        $ptrEnc = Node::encodePtr($value);
+        fseek($this->f, $offset, SEEK_SET);
+        fwrite($this->f, $ptrEnc);
+        $node->left = $value;
+    }
+
+    private function setNodeHeight(Node $node, int $value)
+    {
+        $heightOffset = $node->ptr - 1 + Node::PTR_SIZE * 2 + Node::KEY_SIZE;
+        $heightEnc = Node::encodeHeightField($value);
+        fseek($this->f, $heightOffset, SEEK_SET);
+        fwrite($this->f, $heightEnc);
+        $node->height = $value;
+    }
+
+    private function setNodeValue(Node $node, string $value)
+    {
+        $offset = $node->ptr - 1 + Node::KEY_SIZE + Node::PTR_SIZE * 2 + Node::HEIGHT_SIZE;
+        $valueEnc = Node::encodeValueField($value);
+        fseek($this->f, $offset, SEEK_SET);
+        fwrite($this->f, $valueEnc);
+        $node->value = $value;
+        return true;
+    }
+};
+
