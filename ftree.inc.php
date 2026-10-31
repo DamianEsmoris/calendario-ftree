@@ -7,7 +7,7 @@ class Node {
     public const PTR_SIZE = INT_SIZE;
     public const KEY_SIZE = INT_SIZE;
     public const VALUE_SIZE = CHAR_SIZE*NODE_VALUE_LENGTH;
-    public const ENCODED_SIZE = Node::KEY_SIZE + Node::PTR_SIZE*2 + Node::VALUE_SIZE;
+    public const ENCODED_SIZE = self::KEY_SIZE + self::PTR_SIZE*2 + self::VALUE_SIZE;
 
     public int $left;
     public int $right;
@@ -26,11 +26,11 @@ class Node {
         ]);
     }
 
-    public static function Decode(string $encodedStr): Node {
-        $left =  self::intDecode(substr($encodedStr, 0, 8));
-        $key =  self::intDecode(substr($encodedStr, 8, 16));
-        $right =  self::intDecode(substr($encodedStr, 16, 24));
-        $value =  self::strDecode(substr($encodedStr, 24, Node::ENCODED_SIZE));
+    public static function Decode(string $encodedStr): self {
+        $left = self::intDecode(substr($encodedStr, 0, 8));
+        $key = self::intDecode(substr($encodedStr, 8, 16));
+        $right = self::intDecode(substr($encodedStr, 16, 24));
+        $value = self::strDecode(substr($encodedStr, 24, self::ENCODED_SIZE));
 
         $n = new Node($key, $value);
         $n->left = $left;
@@ -147,6 +147,9 @@ class FTree {
         $ptr--;
         fseek($this->f, $ptr, SEEK_SET);
         $nodeEncoded = fread($this->f, Node::ENCODED_SIZE);
+        if ($nodeEncoded === false || strlen($nodeEncoded) < Node::ENCODED_SIZE) {
+            return null;
+        }
         return Node::Decode($nodeEncoded);
     }
 
