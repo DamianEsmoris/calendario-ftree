@@ -128,8 +128,10 @@ function test_append_persists_height_on_disk(): void {
         assertSame(1, $ft->height());
         $ft->append(3, 'left child, still height 1 under root');
         assertSame(2, $ft->height());
-        $ft->append(6, 'right of 3, deepens the left chain');
-        assertSame(3, $ft->height());
+        // This would deepen the left chain to height 3 in a plain BST, but
+        // AVL rotates it (LR case) into a balanced height-2 tree instead.
+        $ft->append(6, 'right of 3, triggers a rebalancing rotation');
+        assertSame(2, $ft->height());
     });
 }
 
@@ -180,4 +182,88 @@ function test_findRange_matches_brute_force_on_a_random_tree(): void {
             assertSame($expected, $got, "range [$lo,$hi]");
         }
     });
+}
+
+function test_tree_stays_balanced_after_many_random_inserts(): void {
+    withTempFTree(function (FTree $ft) {
+        mt_srand(99);
+        $keys = [];
+        for ($i = 0; $i < 300; $i++) {
+            $k = mt_rand(0, 99999);
+            if (isset($keys[$k])) continue;
+            $keys[$k] = true;
+            $ft->append($k, "v$k");
+        }
+
+        $ref = new ReflectionClass($ft);
+        $getNodeByPtr = $ref->getMethod('getNodeByPtr');
+        $getNodeByPtr->setAccessible(true);
+        $rootPtr = $ref->getProperty('rootPtr');
+        $rootPtr->setAccessible(true);
+
+        $violations = checkAvlInvariant($ft, $getNodeByPtr, $rootPtr->getValue($ft));
+        assertSame([], $violations);
+
+        // A real AVL tree never degenerates to a linear chain.
+        assertTrue($ft->height() <= (int) ceil(1.45 * log(count($keys) + 2, 2)));
+    });
+}
+
+// Recursively checks that every node's balance factor is within [-1, 1]
+// and its stored height matches 1 + max(child heights). Returns a list of
+// violation messages (empty means the AVL invariant holds everywhere).
+function checkAvlInvariant($ft, ReflectionMethod $getNodeByPtr, int $ptr, array &$violations = []): array {
+    $node = $getNodeByPtr->invoke($ft, $ptr);
+    if (!$node) {
+        return $violations;
+    }
+    checkAvlInvariant($ft, $getNodeByPtr, $node->left, $violations);
+    checkAvlInvariant($ft, $getNodeByPtr, $node->right, $violations);
+
+    $left = $getNodeByPtr->invoke($ft, $node->left);
+    $right = $getNodeByPtr->invoke($ft, $node->right);
+    $leftHeight = $left ? $left->height : 0;
+    $rightHeight = $right ? $right->height : 0;
+
+    if (abs($leftHeight - $rightHeight) > 1) {
+        $violations[] = "key={$node->key} unbalanced (left={$leftHeight}, right={$rightHeight})";
+    }
+    $expectedHeight = 1 + max($leftHeight, $rightHeight);
+    if ($node->height !== $expectedHeight) {
+        $violations[] = "key={$node->key} stored height={$node->height}, expected={$expectedHeight}";
+    }
+    return $violations;
+}
+
+function test_custom_value_length_round_trips_longer_values(): void {
+    $path = tempnam(sys_get_temp_dir(), 'ftree_test_');
+    unlink($path);
+    try {
+        $ft = new FTree($path, 200); // default is 50 chars; this value needs more room
+        $longValue = str_repeat('x', 150) . ' fits now';
+        $ft->append(1, $longValue);
+        $ft->append(2, 'short one too');
+        assertSame($longValue, $ft->find(1));
+        assertSame('short one too', $ft->find(2));
+    } finally {
+        @unlink($path);
+    }
+}
+
+function test_custom_value_length_survives_reopening_without_respecifying_it(): void {
+    // Regression: the value-size header field was only kept in PHP memory,
+    // never written to disk, so reopening a custom-length file crashed.
+    $path = tempnam(sys_get_temp_dir(), 'ftree_test_');
+    unlink($path);
+    try {
+        $ft = new FTree($path, 200);
+        $longValue = str_repeat('x', 150) . ' fits now';
+        $ft->append(1, $longValue);
+        unset($ft);
+
+        $reopened = new FTree($path); // no valueLength passed - must come from the file itself
+        assertSame($longValue, $reopened->find(1));
+    } finally {
+        @unlink($path);
+    }
 }

@@ -8,8 +8,7 @@ class Node
     public const PTR_SIZE = INT_SIZE;
     public const KEY_SIZE = INT_SIZE;
     public const HEIGHT_SIZE = INT_SIZE;
-    public const VALUE_SIZE = CHAR_SIZE * NODE_VALUE_LENGTH;
-    public const ENCODED_SIZE = self::KEY_SIZE + self::PTR_SIZE * 2 + self::HEIGHT_SIZE + self::VALUE_SIZE;
+    public const ENCODED_HEADER_SIZE = self::KEY_SIZE + self::PTR_SIZE * 2 + self::HEIGHT_SIZE;
 
     public int $left;
     public int $right;
@@ -23,18 +22,18 @@ class Node
         $this->height = 1;
     }
 
-    public function encode(): string
+    public function encode(int $valueSize): string
     {
         return implode('', [
             self::intEncode($this->left),
             self::intEncode($this->key),
             self::intEncode($this->right),
             self::intEncode($this->height),
-            self::strEncode($this->value)
+            self::strEncode($this->value, $valueSize)
         ]);
     }
 
-    public static function Decode(string $encodedStr): self
+    public static function Decode(string $encodedStr, int $valueSize): self
     {
         $f = 0;
         $t = self::PTR_SIZE;
@@ -53,7 +52,7 @@ class Node
         $height = self::intDecode(substr($encodedStr, $f, $t));
 
         $f = $t;
-        $t += self::ENCODED_SIZE;
+        $t += $valueSize;
         $value = self::strDecode(substr($encodedStr, $f, $t));
 
         $n = new Node($key, $value);
@@ -80,9 +79,19 @@ class Node
         return self::intEncode($ptr);
     }
 
-    public static function encodeValueField(string $value): string
+    public static function decodePtr(string $ptrEnc): string
     {
-        return self::strEncode($value);
+        return self::intDecode($ptrEnc);
+    }
+
+    public static function decodevalueSize(string $valueSizeEnc): string
+    {
+        return self::intDecode($valueSizeEnc);
+    }
+
+    public static function encodeValueField(string $value, int $valueSize): string
+    {
+        return self::strEncode($value, $valueSize);
     }
 
     public static function encodeHeightField(int $height): string
@@ -101,10 +110,11 @@ class Node
         return unpack('V', hex2bin(substr($encoded, 0, 8)))[1];
     }
 
-    private static function strEncode(string $str): string
+    private static function strEncode(string $str, int $valueSize): string
     {
+        $charCount = $valueSize / CHAR_SIZE;
         $out = '';
-        for ($i = 0; $i < NODE_VALUE_LENGTH; $i++) {
+        for ($i = 0; $i < $charCount; $i++) {
             $out .= self::intEncode($i < strlen($str) ? ord($str[$i]) : 0);
         }
         return $out;
@@ -126,13 +136,34 @@ class FTree
 {
     /** @var resource PHP has no usable `resource` type declaration, so this stays untyped */
     private $f;
-    public function __construct(protected string $filePath)
+    private $rootPtr;
+    private $encodedTotalSize;
+    private $valueSize;
+    private $globalFileOffset = Node::PTR_SIZE + INT_SIZE;
+
+    public function __construct(protected string $filePath, int $valueLength = 50)
     {
         $f = fopen($filePath, 'c+');
         if (!$f) {
             throw new Exception('Access denied (probably)');
         }
         $this->f = $f;
+
+        // Get root ptr if preset
+        if ($this->isEmpty($filePath)) {
+            $this->setRootPtr(0);
+            $this->setValueSize($valueLength * CHAR_SIZE);
+        } else {
+            fseek($this->f, 0, SEEK_SET);
+            $ptrEnc = fread($this->f, Node::PTR_SIZE);
+
+            fseek($this->f, Node::PTR_SIZE, SEEK_SET);
+            $encValueSize = fread($this->f, INT_SIZE);
+
+            $this->setRootPtr(Node::decodePtr($ptrEnc));
+            $this->valueSize = Node::decodevalueSize($encValueSize);
+        }
+        $this->encodedTotalSize = NODE::ENCODED_HEADER_SIZE + $this->valueSize;
     }
 
     public function __destruct()
@@ -151,24 +182,29 @@ class FTree
 
     private function isEmpty(): bool
     {
-        return $this->getNextPtr() == 1;
+        clearstatcache();
+        return fstat($this->f)['size'] <= $this->globalFileOffset;
     }
 
     public function append(int $key, string $value): void
     {
         if ($this->isEmpty()) {
+            $ptr = $this->getNextPtr();
             $this->pushNode(new Node($key, $value));
+            $this->setRootPtr($ptr);
             return;
         }
-        $rootPtr = 1;
-        $this->_append($key, $value, $rootPtr);
+        $newRoot = $this->_append($key, $value, $this->rootPtr);
+        if ($newRoot !== $this->rootPtr) {
+            $this->setRootPtr($newRoot);
+        }
     }
 
-    public function _append(int $key, string $value, int $parentPtr): void
+    public function _append(int $key, string $value, int $parentPtr): int
     {
         $parent = $this->getNodeByPtr($parentPtr);
         if (!$parent) {
-            return;
+            return $parentPtr;
         }
         if ($key == $parent->key) {
             throw new Exception('Key ' . $key . ' already exists. use update to replace the content');
@@ -187,21 +223,20 @@ class FTree
             }
             // Keep looking for space
         } else {
-            $this->_append(
-                $key,
-                $value,
-                $child
-            );
+            $newChildRoot = $this->_append($key, $value, $child);
+            if ($newChildRoot !== $child) {
+                if ($key <= $parent->key) {
+                    $this->setNodeLeftPtr($parent, $newChildRoot);
+                } else {
+                    $this->setNodeRightPtr($parent, $newChildRoot);
+                }
+            }
         }
+
+        $this->recomputeHeight($parent);
 
         $leftChild = $this->getNodeByPtr($parent->left);
         $rightChild = $this->getNodeByPtr($parent->right);
-
-        $this->setNodeHeight($parent, 1 + max(
-            Node::Height($leftChild),
-            Node::Height($rightChild)
-        ));
-
 
         $parentBalance = Node::Balance($leftChild, $rightChild);
         $leftChildBalance = $leftChild
@@ -211,29 +246,31 @@ class FTree
             ? Node::Balance($this->getNodeByPtr($rightChild->left), $this->getNodeByPtr($rightChild->right))
             : 0;
 
-        /*
         // LL
         if ($parentBalance > 1 && $leftChildBalance >= 0) {
-            $this->antiClockWiseRot($parent);
+            return $this->antiClockWiseRot($parent);
         }
 
         // LR
         if ($parentBalance > 1 && $leftChildBalance < 0) {
-            $this->antiClockWiseRot($parent);
-            $this->clockWiseRot($parent);
+            $newLeftPtr = $this->clockWiseRot($leftChild);
+            $this->setNodeLeftPtr($parent, $newLeftPtr);
+            return $this->antiClockWiseRot($parent);
         }
 
         // RR
-        if ($parentBalance < -1 && $rightChildBalance >= 0) {
-            $this->clockWiseRot($parent);
+        if ($parentBalance < -1 && $rightChildBalance <= 0) {
+            return $this->clockWiseRot($parent);
         }
 
         // RL
-        if ($parentBalance < -1 && $rightChildBalance >= 0) {
-            $this->clockWiseRot($parent);
-            $this->antiClockWiseRot($parent);
+        if ($parentBalance < -1 && $rightChildBalance > 0) {
+            $newRightPtr = $this->antiClockWiseRot($rightChild);
+            $this->setNodeRightPtr($parent, $newRightPtr);
+            return $this->clockWiseRot($parent);
         }
-        */
+
+        return $parent->ptr;
     }
 
     private function getNodeByPtr(int $ptr): ?Node
@@ -243,11 +280,11 @@ class FTree
         }
         $ptr--;
         fseek($this->f, $ptr, SEEK_SET);
-        $nodeEncoded = fread($this->f, Node::ENCODED_SIZE);
-        if ($nodeEncoded === false || strlen($nodeEncoded) < Node::ENCODED_SIZE) {
+        $nodeEncoded = fread($this->f, $this->encodedTotalSize);
+        if ($nodeEncoded === false || strlen($nodeEncoded) < $this->encodedTotalSize) {
             return null;
         }
-        $node = Node::Decode($nodeEncoded);
+        $node = Node::Decode($nodeEncoded, $this->valueSize);
         $node->ptr = $ptr+1;
         return $node;
     }
@@ -255,7 +292,7 @@ class FTree
     private function pushNode(Node $node): void
     {
         fseek($this->f, 0, SEEK_END);
-        fwrite($this->f, $node->encode(), $node::ENCODED_SIZE);
+        fwrite($this->f, $node->encode($this->valueSize), $this->encodedTotalSize);
     }
 
     public function update(int $key, string $value): bool
@@ -264,7 +301,7 @@ class FTree
             return false;
         }
 
-        $nodePtr = 1;
+        $nodePtr = $this->rootPtr;
         $node = $this->getNodeByPtr($nodePtr);
 
         while ($node && $node->key !== $key) {
@@ -291,7 +328,7 @@ class FTree
 
     public function height(): int
     {
-        return Node::Height($this->getNodeByPtr(1));
+        return Node::Height($this->getRootNode());
     }
 
     public function find(int $key): ?string
@@ -300,7 +337,7 @@ class FTree
             return null;
         }
 
-        $parentPtr = 1;
+        $parentPtr = $this->rootPtr;
         $parent = $this->getNodeByPtr($parentPtr);
 
         while (
@@ -318,7 +355,7 @@ class FTree
     public function inOrder(): array
     {
         $arr = [];
-        foreach ($this->_inOrder($this->getNodeByPtr(1)) as $node) {
+        foreach ($this->_inOrder($this->getRootNode()) as $node) {
             $arr[$node->key] = $node->value;
         }
         return $arr;
@@ -340,7 +377,7 @@ class FTree
     public function findRange(int $fromKey, int $toKey): array
     {
         $arr = [];
-        foreach ($this->_findRange($fromKey, $toKey, $this->getNodeByPtr(1)) as $node) {
+        foreach ($this->_findRange($fromKey, $toKey, $this->getRootNode()) as $node) {
             $arr[$node->key] = $node->value;
         }
         return $arr;
@@ -377,23 +414,39 @@ class FTree
         return $arr;
     }
 
-    private function clockWiseRot(Node $node)
+    private function clockWiseRot(Node $node): int
     {
-        $node = $this->getNodeByPtr($node->ptr);
+        $pivot = $this->getNodeByPtr($node->right);
+        $pivotLeftPtr = $pivot->left;
 
-        $rightChild = $this->getNodeByPtr($node->right);
-        $rightLeftChild = $rightChild ? $rightChild->left : 0;
+        $this->setNodeRightPtr($node, $pivotLeftPtr);
+        $this->setNodeLeftPtr($pivot, $node->ptr);
 
-        $this->setNodeRightPtr($node, $rightLeftChild);
-        $this->setNodeLeftPtr($node, $node->right);
+        $this->recomputeHeight($node);
+        $this->recomputeHeight($pivot);
+
+        return $pivot->ptr;
     }
 
-    private function antiClockWiseRot(Node $node) {
-        $leftChild = $this->getNodeByPtr($node->left);
-        $leftRightChild = $leftChild ? $leftChild->right : 0;
+    private function antiClockWiseRot(Node $node): int
+    {
+        $pivot = $this->getNodeByPtr($node->left);
+        $pivotRightPtr = $pivot->right;
 
-        $this->setNodeRightPtr($node, $leftRightChild);
-        $this->setNodeLeftPtr($node, $node->right);
+        $this->setNodeLeftPtr($node, $pivotRightPtr);
+        $this->setNodeRightPtr($pivot, $node->ptr);
+
+        $this->recomputeHeight($node);
+        $this->recomputeHeight($pivot);
+
+        return $pivot->ptr;
+    }
+
+    private function recomputeHeight(Node $node): void
+    {
+        $left = $this->getNodeByPtr($node->left);
+        $right = $this->getNodeByPtr($node->right);
+        $this->setNodeHeight($node, 1 + max(Node::Height($left), Node::Height($right)));
     }
 
     private function setNodeRightPtr(Node $node, int $value) {
@@ -414,9 +467,9 @@ class FTree
 
     private function setNodeHeight(Node $node, int $value)
     {
-        $heightOffset = $node->ptr - 1 + Node::PTR_SIZE * 2 + Node::KEY_SIZE;
+        $offset = $node->ptr - 1 + Node::PTR_SIZE * 2 + Node::KEY_SIZE;
         $heightEnc = Node::encodeHeightField($value);
-        fseek($this->f, $heightOffset, SEEK_SET);
+        fseek($this->f, $offset, SEEK_SET);
         fwrite($this->f, $heightEnc);
         $node->height = $value;
     }
@@ -424,11 +477,32 @@ class FTree
     private function setNodeValue(Node $node, string $value)
     {
         $offset = $node->ptr - 1 + Node::KEY_SIZE + Node::PTR_SIZE * 2 + Node::HEIGHT_SIZE;
-        $valueEnc = Node::encodeValueField($value);
+        $valueEnc = Node::encodeValueField($value, $this->valueSize);
         fseek($this->f, $offset, SEEK_SET);
         fwrite($this->f, $valueEnc);
         $node->value = $value;
         return true;
+    }
+
+    private function setRootPtr(int $value)
+    {
+        $this->rootPtr = $value;
+        $ptrEnc = Node::encodePtr($value);
+        fseek($this->f, 0, SEEK_SET);
+        fwrite($this->f, $ptrEnc);
+    }
+
+    private function setValueSize(int $value): void
+    {
+        $this->valueSize = $value;
+        $sizeEnc = Node::encodePtr($value);
+        fseek($this->f, Node::PTR_SIZE, SEEK_SET);
+        fwrite($this->f, $sizeEnc);
+    }
+
+    private function getRootNode(): Node | null
+    {
+        return $this->getNodeByPtr($this->rootPtr);
     }
 };
 
