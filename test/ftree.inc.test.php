@@ -267,3 +267,61 @@ function test_custom_value_length_survives_reopening_without_respecifying_it(): 
         @unlink($path);
     }
 }
+
+function test_rotations_do_not_leak_values_into_header_cache(): void {
+    // Regression: clockWiseRot/antiClockWiseRot fetched their pivot via the
+    // full node+value read instead of the header-only one, so every rotation
+    // leaked a value string into what's supposed to be a header-only cache.
+    withTempFTree(function (FTree $ft) {
+        $ft->append(25, 'root value, should never sit in header cache');
+        $ft->append(3, 'left child value, should never sit in header cache');
+        $ft->append(6, 'triggers an LR rotation, should not leak either');
+
+        $ref = new ReflectionClass($ft);
+        $cacheProp = $ref->getProperty('headersCache');
+        $cacheProp->setAccessible(true);
+
+        foreach ($cacheProp->getValue($ft) as $ptr => $node) {
+            assertNull($node->value, "ptr $ptr leaked a value into the header cache");
+        }
+    });
+}
+
+function test_cache_size_counter_only_counts_distinct_entries(): void {
+    // Regression: the counter incremented on every write, even when
+    // updating an already-cached ptr, so it drastically overcounted and
+    // the cap kicked in far earlier than the configured limit.
+    $path = tempnam(sys_get_temp_dir(), 'ftree_test_');
+    unlink($path);
+    try {
+        $ft = new FTree($path, 50, cacheLimit: 5);
+        mt_srand(11);
+        $seen = [];
+        $i = 0;
+        while ($i < 20) {
+            $k = mt_rand(0, 99999);
+            if (isset($seen[$k])) continue;
+            $seen[$k] = true;
+            $ft->append($k, "v$i");
+            $i++;
+        }
+
+        $ref = new ReflectionClass($ft);
+        $cacheProp = $ref->getProperty('headersCache');
+        $cacheProp->setAccessible(true);
+        $sizeProp = $ref->getProperty('cacheSize');
+        $sizeProp->setAccessible(true);
+
+        assertSame(5, count($cacheProp->getValue($ft)));
+        assertSame(5, $sizeProp->getValue($ft));
+
+        // The cap only throttles caching; the tree itself must stay correct.
+        $i = 0;
+        foreach ($seen as $k => $_) {
+            assertSame("v$i", $ft->find($k));
+            $i++;
+        }
+    } finally {
+        @unlink($path);
+    }
+}

@@ -26,8 +26,8 @@ TODO: Revisar bien el formato porque me estoy mancando seguro.
 - [x] Implementar el tooling BT en un archivo (tener archivos funcionales , obtener nodo, etc.)
 - [x] Operaciones comunes BT (insertar, buscar, obtener rango y para no complicar con el borrado únicamente borrar el detalle (cuenta como update))
 - [x] Hacer API simplona para abstraer el TAD
-- [ ] Digievolución de BT a BST
+- [X] Digievolución de BT a BST
 - [ ] Hacer una clase de calendario que maneje el CRUD
 - [ ] Endpoints CRUD
 - [ ] Integrar con horrible HTML
-- [ ] Considerar si se cae a pedazos implementar una leve capa de cache: (clave, offset, izq, der)
+- [x] Considerar si se cae a pedazos implementar una leve capa de cache: (clave, offset, izq, der)

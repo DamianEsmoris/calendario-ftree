@@ -15,7 +15,7 @@ class Node
     public int $height;
     public int $ptr;
 
-    public function __construct(public int $key, public string $value)
+    public function __construct(public int $key, public ?string $value = null)
     {
         $this->left = 0;
         $this->right = 0;
@@ -33,7 +33,15 @@ class Node
         ]);
     }
 
-    public static function Decode(string $encodedStr, int $valueSize): self
+    public static function DecodeFullNode(string $encodedStr, int $valueSize)
+    {
+        $n = Node::DecodeHeader($encodedStr);
+        $value = substr($encodedStr, self::ENCODED_HEADER_SIZE, $valueSize);
+        $n->value = self::strDecode($value);
+        return $n;
+    }
+
+    public static function DecodeHeader(string $encodedStr): self
     {
         $f = 0;
         $t = self::PTR_SIZE;
@@ -51,16 +59,13 @@ class Node
         $t += self::HEIGHT_SIZE;
         $height = self::intDecode(substr($encodedStr, $f, $t));
 
-        $f = $t;
-        $t += $valueSize;
-        $value = self::strDecode(substr($encodedStr, $f, $t));
-
-        $n = new Node($key, $value);
+        $n = new Node($key);
         $n->left = $left;
         $n->right = $right;
         $n->height = $height;
         return $n;
     }
+
 
     public static function Height(?Node $node): int
     {
@@ -140,14 +145,19 @@ class FTree
     private $encodedTotalSize;
     private $valueSize;
     private $globalFileOffset = Node::PTR_SIZE + INT_SIZE;
+    private $headersCache;
+    private $cacheSize;
 
-    public function __construct(protected string $filePath, int $valueLength = 50)
+    public function __construct(protected string $filePath, int $valueLength = 50, public int $cacheLimit = 100_000)
     {
         $f = fopen($filePath, 'c+');
         if (!$f) {
             throw new Exception('Access denied (probably)');
         }
         $this->f = $f;
+
+        $this->headersCache = [];
+        $this->cacheSize = 0;
 
         // Get root ptr if preset
         if ($this->isEmpty($filePath)) {
@@ -202,7 +212,7 @@ class FTree
 
     public function _append(int $key, string $value, int $parentPtr): int
     {
-        $parent = $this->getNodeByPtr($parentPtr);
+        $parent = $this->getNodeHeaderByPtr($parentPtr);
         if (!$parent) {
             return $parentPtr;
         }
@@ -217,8 +227,7 @@ class FTree
             $this->pushNode(new Node($key, $value));
             if ($key <= $parent->key) {
                 $this->setNodeLeftPtr($parent, $ptr);
-            }
-            else {
+            } else {
                 $this->setNodeRightPtr($parent, $ptr);
             }
             // Keep looking for space
@@ -235,16 +244,20 @@ class FTree
 
         $this->recomputeHeight($parent);
 
-        $leftChild = $this->getNodeByPtr($parent->left);
-        $rightChild = $this->getNodeByPtr($parent->right);
+        $leftChild = $this->getNodeHeaderByPtr($parent->left);
+        $rightChild = $this->getNodeHeaderByPtr($parent->right);
 
         $parentBalance = Node::Balance($leftChild, $rightChild);
         $leftChildBalance = $leftChild
-            ? Node::Balance($this->getNodeByPtr($leftChild->left), $this->getNodeByPtr($leftChild->right))
-            : 0;
+            ? Node::Balance(
+                $this->getNodeHeaderByPtr($leftChild->left),
+                $this->getNodeHeaderByPtr($leftChild->right)
+            ) : 0;
         $rightChildBalance = $rightChild
-            ? Node::Balance($this->getNodeByPtr($rightChild->left), $this->getNodeByPtr($rightChild->right))
-            : 0;
+            ? Node::Balance(
+                $this->getNodeHeaderByPtr($rightChild->left),
+                $this->getNodeHeaderByPtr($rightChild->right)
+            ) : 0;
 
         // LL
         if ($parentBalance > 1 && $leftChildBalance >= 0) {
@@ -273,6 +286,29 @@ class FTree
         return $parent->ptr;
     }
 
+    private function getNodeHeaderByPtr(int $ptr): ?Node
+    {
+        if ($ptr < 1) {
+            return null;
+        }
+
+        $cachedNode = $this->searchNodeInCache($ptr);
+        if ($cachedNode) {
+            return $cachedNode;
+        }
+
+        $ptr--;
+        fseek($this->f, $ptr, SEEK_SET);
+        $nodeEncoded = fread($this->f, Node::ENCODED_HEADER_SIZE);
+        if ($nodeEncoded === false || strlen($nodeEncoded) < Node::ENCODED_HEADER_SIZE) {
+            return null;
+        }
+        $node = Node::DecodeHeader($nodeEncoded);
+        $node->ptr = $ptr + 1;
+        $this->addOrUpdateNodeHeaderCache($node);
+        return $node;
+    }
+
     private function getNodeByPtr(int $ptr): ?Node
     {
         if ($ptr < 1) {
@@ -284,8 +320,8 @@ class FTree
         if ($nodeEncoded === false || strlen($nodeEncoded) < $this->encodedTotalSize) {
             return null;
         }
-        $node = Node::Decode($nodeEncoded, $this->valueSize);
-        $node->ptr = $ptr+1;
+        $node = Node::DecodeFullNode($nodeEncoded, $this->valueSize);
+        $node->ptr = $ptr + 1;
         return $node;
     }
 
@@ -328,7 +364,7 @@ class FTree
 
     public function height(): int
     {
-        return Node::Height($this->getRootNode());
+        return Node::Height($this->getRootNodeHeader());
     }
 
     public function find(int $key): ?string
@@ -416,7 +452,7 @@ class FTree
 
     private function clockWiseRot(Node $node): int
     {
-        $pivot = $this->getNodeByPtr($node->right);
+        $pivot = $this->getNodeHeaderByPtr($node->right);
         $pivotLeftPtr = $pivot->left;
 
         $this->setNodeRightPtr($node, $pivotLeftPtr);
@@ -430,7 +466,7 @@ class FTree
 
     private function antiClockWiseRot(Node $node): int
     {
-        $pivot = $this->getNodeByPtr($node->left);
+        $pivot = $this->getNodeHeaderByPtr($node->left);
         $pivotRightPtr = $pivot->right;
 
         $this->setNodeLeftPtr($node, $pivotRightPtr);
@@ -444,25 +480,29 @@ class FTree
 
     private function recomputeHeight(Node $node): void
     {
-        $left = $this->getNodeByPtr($node->left);
-        $right = $this->getNodeByPtr($node->right);
+        $left = $this->getNodeHeaderByPtr($node->left);
+        $right = $this->getNodeHeaderByPtr($node->right);
         $this->setNodeHeight($node, 1 + max(Node::Height($left), Node::Height($right)));
     }
 
-    private function setNodeRightPtr(Node $node, int $value) {
+    private function setNodeRightPtr(Node $node, int $value)
+    {
         $offset = $node->ptr - 1 + Node::PTR_SIZE + Node::KEY_SIZE;
         $ptrEnc = Node::encodePtr($value);
         fseek($this->f, $offset, SEEK_SET);
         fwrite($this->f, $ptrEnc);
         $node->right = $value;
+        $this->addOrUpdateNodeHeaderCache($node);
     }
 
-    private function setNodeLeftPtr(Node $node, int $value) {
+    private function setNodeLeftPtr(Node $node, int $value)
+    {
         $offset = $node->ptr - 1 + 0;
         $ptrEnc = Node::encodePtr($value);
         fseek($this->f, $offset, SEEK_SET);
         fwrite($this->f, $ptrEnc);
         $node->left = $value;
+        $this->addOrUpdateNodeHeaderCache($node);
     }
 
     private function setNodeHeight(Node $node, int $value)
@@ -472,6 +512,7 @@ class FTree
         fseek($this->f, $offset, SEEK_SET);
         fwrite($this->f, $heightEnc);
         $node->height = $value;
+        $this->addOrUpdateNodeHeaderCache($node);
     }
 
     private function setNodeValue(Node $node, string $value)
@@ -504,5 +545,29 @@ class FTree
     {
         return $this->getNodeByPtr($this->rootPtr);
     }
-};
 
+    private function getRootNodeHeader(): Node | null
+    {
+        return $this->getNodeHeaderByPtr($this->rootPtr);
+    }
+
+    private function addOrUpdateNodeHeaderCache(Node $node)
+    {
+        $isNewEntry = !key_exists($node->ptr, $this->headersCache);
+        if ($isNewEntry && $this->cacheSize >= $this->cacheLimit) {
+            return;
+        }
+        $this->headersCache[$node->ptr] = $node;
+        if ($isNewEntry) {
+            $this->cacheSize++;
+        }
+    }
+
+    private function searchNodeInCache(int $ptr): Node | null
+    {
+        if (!key_exists($ptr, $this->headersCache)) {
+            return null;
+        }
+        return $this->headersCache[$ptr];
+    }
+};
