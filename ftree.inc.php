@@ -3,7 +3,7 @@ const INT_SIZE = 8;
 const CHAR_SIZE = 8;
 const NODE_VALUE_LENGTH = 50;
 
-class Node
+class NodeHeader
 {
     public const PTR_SIZE = INT_SIZE;
     public const KEY_SIZE = INT_SIZE;
@@ -15,33 +15,25 @@ class Node
     public int $height;
     public int $ptr;
 
-    public function __construct(public int $key, public ?string $value = null)
+    public function __construct(public int $key)
     {
         $this->left = 0;
         $this->right = 0;
         $this->height = 1;
     }
 
-    public function encode(int $valueSize): string
+    public static function decodeHeader(string $encodedStr): self
     {
-        return implode('', [
-            self::intEncode($this->left),
-            self::intEncode($this->key),
-            self::intEncode($this->right),
-            self::intEncode($this->height),
-            self::strEncode($this->value, $valueSize)
-        ]);
+        [$left, $key, $right, $height] = self::decodeHeaderFields($encodedStr);
+
+        $node = new self($key);
+        $node->left = $left;
+        $node->right = $right;
+        $node->height = $height;
+        return $node;
     }
 
-    public static function DecodeFullNode(string $encodedStr, int $valueSize)
-    {
-        $n = Node::DecodeHeader($encodedStr);
-        $value = substr($encodedStr, self::ENCODED_HEADER_SIZE, $valueSize);
-        $n->value = self::strDecode($value);
-        return $n;
-    }
-
-    public static function DecodeHeader(string $encodedStr): self
+    protected static function decodeHeaderFields(string $encodedStr): array
     {
         $f = 0;
         $t = self::PTR_SIZE;
@@ -59,24 +51,20 @@ class Node
         $t += self::HEIGHT_SIZE;
         $height = self::intDecode(substr($encodedStr, $f, $t));
 
-        $n = new Node($key);
-        $n->left = $left;
-        $n->right = $right;
-        $n->height = $height;
-        return $n;
+        return [$left, $key, $right, $height];
     }
 
-
-    public static function Height(?Node $node): int
+    public static function height(?NodeHeader $node): int
     {
         if (!$node) {
             return 0;
         }
         return $node->height;
     }
-    public static function Balance(?Node $left, ?Node $right): int
+
+    public static function balance(?NodeHeader $left, ?NodeHeader $right): int
     {
-        return self::Height($left) - self::Height($right);
+        return self::height($left) - self::height($right);
     }
 
     public static function encodePtr(int $ptr): string
@@ -89,14 +77,9 @@ class Node
         return self::intDecode($ptrEnc);
     }
 
-    public static function decodevalueSize(string $valueSizeEnc): string
+    public static function decodeValueSize(string $valueSizeEnc): string
     {
         return self::intDecode($valueSizeEnc);
-    }
-
-    public static function encodeValueField(string $value, int $valueSize): string
-    {
-        return self::strEncode($value, $valueSize);
     }
 
     public static function encodeHeightField(int $height): string
@@ -105,14 +88,51 @@ class Node
     }
 
     // little-endian 4-byte uint32
-    private static function intEncode(int $x): string
+    protected static function intEncode(int $x): string
     {
         return bin2hex(pack('V', $x));
     }
 
-    private static function intDecode(string $encoded): int
+    protected static function intDecode(string $encoded): int
     {
         return unpack('V', hex2bin(substr($encoded, 0, 8)))[1];
+    }
+}
+
+// A NodeHeader plus its value - the full on-disk record.
+class Node extends NodeHeader
+{
+    public function __construct(int $key, public string $value)
+    {
+        parent::__construct($key);
+    }
+
+    public function encode(int $valueSize): string
+    {
+        return implode('', [
+            self::intEncode($this->left),
+            self::intEncode($this->key),
+            self::intEncode($this->right),
+            self::intEncode($this->height),
+            self::strEncode($this->value, $valueSize)
+        ]);
+    }
+
+    public static function decodeFullNode(string $encodedStr, int $valueSize): self
+    {
+        [$left, $key, $right, $height] = self::decodeHeaderFields($encodedStr);
+        $value = self::strDecode(substr($encodedStr, self::ENCODED_HEADER_SIZE, $valueSize));
+
+        $node = new self($key, $value);
+        $node->left = $left;
+        $node->right = $right;
+        $node->height = $height;
+        return $node;
+    }
+
+    public static function encodeValueField(string $value, int $valueSize): string
+    {
+        return self::strEncode($value, $valueSize);
     }
 
     private static function strEncode(string $str, int $valueSize): string
@@ -144,7 +164,8 @@ class FTree
     private $rootPtr;
     private $encodedTotalSize;
     private $valueSize;
-    private $globalFileOffset = Node::PTR_SIZE + INT_SIZE;
+    private $globalFileOffset = NodeHeader::PTR_SIZE + INT_SIZE;
+    /** @var array<int, NodeHeader> */
     private $headersCache;
     private $cacheSize;
 
@@ -165,15 +186,15 @@ class FTree
             $this->setValueSize($valueLength * CHAR_SIZE);
         } else {
             fseek($this->f, 0, SEEK_SET);
-            $ptrEnc = fread($this->f, Node::PTR_SIZE);
+            $ptrEnc = fread($this->f, NodeHeader::PTR_SIZE);
 
-            fseek($this->f, Node::PTR_SIZE, SEEK_SET);
+            fseek($this->f, NodeHeader::PTR_SIZE, SEEK_SET);
             $encValueSize = fread($this->f, INT_SIZE);
 
-            $this->setRootPtr(Node::decodePtr($ptrEnc));
-            $this->valueSize = Node::decodevalueSize($encValueSize);
+            $this->setRootPtr(NodeHeader::decodePtr($ptrEnc));
+            $this->valueSize = NodeHeader::decodeValueSize($encValueSize);
         }
-        $this->encodedTotalSize = NODE::ENCODED_HEADER_SIZE + $this->valueSize;
+        $this->encodedTotalSize = NodeHeader::ENCODED_HEADER_SIZE + $this->valueSize;
     }
 
     public function __destruct()
@@ -247,14 +268,14 @@ class FTree
         $leftChild = $this->getNodeHeaderByPtr($parent->left);
         $rightChild = $this->getNodeHeaderByPtr($parent->right);
 
-        $parentBalance = Node::Balance($leftChild, $rightChild);
+        $parentBalance = NodeHeader::balance($leftChild, $rightChild);
         $leftChildBalance = $leftChild
-            ? Node::Balance(
+            ? NodeHeader::balance(
                 $this->getNodeHeaderByPtr($leftChild->left),
                 $this->getNodeHeaderByPtr($leftChild->right)
             ) : 0;
         $rightChildBalance = $rightChild
-            ? Node::Balance(
+            ? NodeHeader::balance(
                 $this->getNodeHeaderByPtr($rightChild->left),
                 $this->getNodeHeaderByPtr($rightChild->right)
             ) : 0;
@@ -286,7 +307,7 @@ class FTree
         return $parent->ptr;
     }
 
-    private function getNodeHeaderByPtr(int $ptr): ?Node
+    private function getNodeHeaderByPtr(int $ptr): ?NodeHeader
     {
         if ($ptr < 1) {
             return null;
@@ -299,11 +320,11 @@ class FTree
 
         $ptr--;
         fseek($this->f, $ptr, SEEK_SET);
-        $nodeEncoded = fread($this->f, Node::ENCODED_HEADER_SIZE);
-        if ($nodeEncoded === false || strlen($nodeEncoded) < Node::ENCODED_HEADER_SIZE) {
+        $nodeEncoded = fread($this->f, NodeHeader::ENCODED_HEADER_SIZE);
+        if ($nodeEncoded === false || strlen($nodeEncoded) < NodeHeader::ENCODED_HEADER_SIZE) {
             return null;
         }
-        $node = Node::DecodeHeader($nodeEncoded);
+        $node = NodeHeader::decodeHeader($nodeEncoded);
         $node->ptr = $ptr + 1;
         $this->addOrUpdateNodeHeaderCache($node);
         return $node;
@@ -320,7 +341,7 @@ class FTree
         if ($nodeEncoded === false || strlen($nodeEncoded) < $this->encodedTotalSize) {
             return null;
         }
-        $node = Node::DecodeFullNode($nodeEncoded, $this->valueSize);
+        $node = Node::decodeFullNode($nodeEncoded, $this->valueSize);
         $node->ptr = $ptr + 1;
         return $node;
     }
@@ -364,7 +385,7 @@ class FTree
 
     public function height(): int
     {
-        return Node::Height($this->getRootNodeHeader());
+        return NodeHeader::height($this->getRootNodeHeader());
     }
 
     public function find(int $key): ?string
@@ -374,7 +395,7 @@ class FTree
         }
 
         $parentPtr = $this->rootPtr;
-        $parent = $this->getNodeByPtr($parentPtr);
+        $parent = $this->getNodeHeaderByPtr($parentPtr);
 
         while (
             $parent->key !== $key && (
@@ -383,9 +404,12 @@ class FTree
             )
         ) {
             $parentPtr = $key <= $parent->key ? $parent->left : $parent->right;
-            $parent = $this->getNodeByPtr($parentPtr);
+            $parent = $this->getNodeHeaderByPtr($parentPtr);
         }
-        return $parent->key === $key ? $parent->value : null;
+        if ($parent->key !== $key) {
+            return null;
+        }
+        return $this->getNodeByPtr($parent->ptr)->value;
     }
 
     public function inOrder(): array
@@ -398,15 +422,15 @@ class FTree
     }
 
     /** @return Node[] */
-    private function _inOrder(?Node $root, array $arr = []): array
+    private function _inOrder(?Node $root, array &$arr = []): array
     {
         if (!$root) {
             return $arr;
         }
 
-        $arr = $this->_inOrder($this->getNodeByPtr($root->left), $arr);
+        $this->_inOrder($this->getNodeByPtr($root->left), $arr);
         array_push($arr, $root);
-        $arr = $this->_inOrder($this->getNodeByPtr($root->right), $arr);
+        $this->_inOrder($this->getNodeByPtr($root->right), $arr);
         return $arr;
     }
 
@@ -420,37 +444,38 @@ class FTree
     }
 
     /** @return Node[] */
-    private function _findRange(int $fromKey, int $toKey, ?Node $root, array $arr = []): array
+    private function _findRange(int $fromKey, int $toKey, ?NodeHeader $root, array &$arr = []): array
     {
         if (!$root) {
             return $arr;
         }
 
         if ($fromKey <= $root->key) {
-            $arr = $this->_findRange(
+            $this->_findRange(
                 $fromKey,
                 $toKey,
-                $this->getNodeByPtr($root->left),
+                $this->getNodeHeaderByPtr($root->left),
                 $arr
             );
         }
 
         if ($root->key >= $fromKey && $root->key <= $toKey) {
+            $root = $this->getNodeByPtr($root->ptr);
             array_push($arr, $root);
         }
 
         if ($toKey >= $root->key) {
-            $arr = $this->_findRange(
+            $this->_findRange(
                 $fromKey,
                 $toKey,
-                $this->getNodeByPtr($root->right),
+                $this->getNodeHeaderByPtr($root->right),
                 $arr
             );
         }
         return $arr;
     }
 
-    private function clockWiseRot(Node $node): int
+    private function clockWiseRot(NodeHeader $node): int
     {
         $pivot = $this->getNodeHeaderByPtr($node->right);
         $pivotLeftPtr = $pivot->left;
@@ -464,7 +489,7 @@ class FTree
         return $pivot->ptr;
     }
 
-    private function antiClockWiseRot(Node $node): int
+    private function antiClockWiseRot(NodeHeader $node): int
     {
         $pivot = $this->getNodeHeaderByPtr($node->left);
         $pivotRightPtr = $pivot->right;
@@ -478,37 +503,37 @@ class FTree
         return $pivot->ptr;
     }
 
-    private function recomputeHeight(Node $node): void
+    private function recomputeHeight(NodeHeader $node): void
     {
         $left = $this->getNodeHeaderByPtr($node->left);
         $right = $this->getNodeHeaderByPtr($node->right);
-        $this->setNodeHeight($node, 1 + max(Node::Height($left), Node::Height($right)));
+        $this->setNodeHeight($node, 1 + max(NodeHeader::height($left), NodeHeader::height($right)));
     }
 
-    private function setNodeRightPtr(Node $node, int $value)
+    private function setNodeRightPtr(NodeHeader $node, int $value)
     {
-        $offset = $node->ptr - 1 + Node::PTR_SIZE + Node::KEY_SIZE;
-        $ptrEnc = Node::encodePtr($value);
+        $offset = $node->ptr - 1 + NodeHeader::PTR_SIZE + NodeHeader::KEY_SIZE;
+        $ptrEnc = NodeHeader::encodePtr($value);
         fseek($this->f, $offset, SEEK_SET);
         fwrite($this->f, $ptrEnc);
         $node->right = $value;
         $this->addOrUpdateNodeHeaderCache($node);
     }
 
-    private function setNodeLeftPtr(Node $node, int $value)
+    private function setNodeLeftPtr(NodeHeader $node, int $value)
     {
         $offset = $node->ptr - 1 + 0;
-        $ptrEnc = Node::encodePtr($value);
+        $ptrEnc = NodeHeader::encodePtr($value);
         fseek($this->f, $offset, SEEK_SET);
         fwrite($this->f, $ptrEnc);
         $node->left = $value;
         $this->addOrUpdateNodeHeaderCache($node);
     }
 
-    private function setNodeHeight(Node $node, int $value)
+    private function setNodeHeight(NodeHeader $node, int $value)
     {
-        $offset = $node->ptr - 1 + Node::PTR_SIZE * 2 + Node::KEY_SIZE;
-        $heightEnc = Node::encodeHeightField($value);
+        $offset = $node->ptr - 1 + NodeHeader::PTR_SIZE * 2 + NodeHeader::KEY_SIZE;
+        $heightEnc = NodeHeader::encodeHeightField($value);
         fseek($this->f, $offset, SEEK_SET);
         fwrite($this->f, $heightEnc);
         $node->height = $value;
@@ -517,7 +542,7 @@ class FTree
 
     private function setNodeValue(Node $node, string $value)
     {
-        $offset = $node->ptr - 1 + Node::KEY_SIZE + Node::PTR_SIZE * 2 + Node::HEIGHT_SIZE;
+        $offset = $node->ptr - 1 + NodeHeader::KEY_SIZE + NodeHeader::PTR_SIZE * 2 + NodeHeader::HEIGHT_SIZE;
         $valueEnc = Node::encodeValueField($value, $this->valueSize);
         fseek($this->f, $offset, SEEK_SET);
         fwrite($this->f, $valueEnc);
@@ -528,7 +553,7 @@ class FTree
     private function setRootPtr(int $value)
     {
         $this->rootPtr = $value;
-        $ptrEnc = Node::encodePtr($value);
+        $ptrEnc = NodeHeader::encodePtr($value);
         fseek($this->f, 0, SEEK_SET);
         fwrite($this->f, $ptrEnc);
     }
@@ -536,8 +561,8 @@ class FTree
     private function setValueSize(int $value): void
     {
         $this->valueSize = $value;
-        $sizeEnc = Node::encodePtr($value);
-        fseek($this->f, Node::PTR_SIZE, SEEK_SET);
+        $sizeEnc = NodeHeader::encodePtr($value);
+        fseek($this->f, NodeHeader::PTR_SIZE, SEEK_SET);
         fwrite($this->f, $sizeEnc);
     }
 
@@ -546,12 +571,12 @@ class FTree
         return $this->getNodeByPtr($this->rootPtr);
     }
 
-    private function getRootNodeHeader(): Node | null
+    private function getRootNodeHeader(): NodeHeader | null
     {
         return $this->getNodeHeaderByPtr($this->rootPtr);
     }
 
-    private function addOrUpdateNodeHeaderCache(Node $node)
+    private function addOrUpdateNodeHeaderCache(NodeHeader $node)
     {
         $isNewEntry = !key_exists($node->ptr, $this->headersCache);
         if ($isNewEntry && $this->cacheSize >= $this->cacheLimit) {
@@ -563,7 +588,7 @@ class FTree
         }
     }
 
-    private function searchNodeInCache(int $ptr): Node | null
+    private function searchNodeInCache(int $ptr): NodeHeader | null
     {
         if (!key_exists($ptr, $this->headersCache)) {
             return null;

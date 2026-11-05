@@ -282,7 +282,7 @@ function test_rotations_do_not_leak_values_into_header_cache(): void {
         $cacheProp->setAccessible(true);
 
         foreach ($cacheProp->getValue($ft) as $ptr => $node) {
-            assertNull($node->value, "ptr $ptr leaked a value into the header cache");
+            assertSame(false, $node instanceof Node, "ptr $ptr leaked a full Node (with value) into the header cache");
         }
     });
 }
@@ -324,4 +324,22 @@ function test_cache_size_counter_only_counts_distinct_entries(): void {
     } finally {
         @unlink($path);
     }
+}
+
+function test_findRange_returns_real_values_not_just_keys(): void {
+    // Regression: _findRange's recursive descent fetches children via the
+    // header-only cache lookup, which has no value. A match found below the
+    // root used to get pushed as-is (value === null) instead of being
+    // upgraded to a full fetch first.
+    withTempFTree(function (FTree $ft) {
+        $ft->append(25, 'value-25');
+        $ft->append(3, 'value-3');
+        $ft->append(6, 'value-6');
+        $ft->append(28, 'value-28');
+
+        assertSame([
+            3 => 'value-3',
+            6 => 'value-6',
+        ], $ft->findRange(2, 9));
+    });
 }
