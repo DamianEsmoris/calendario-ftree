@@ -1,0 +1,427 @@
+
+:root {
+    --bg: #f8f9fb;
+    --surface: #ffffff;
+    --border: #edf0f3;
+    --text: #252a32;
+    --text-muted: #9299a3;
+    --accent: #496fc4;
+    --accent-soft: #edf2ff;
+}
+
+* {
+    box-sizing: border-box;
+}
+
+html, body {
+    min-height: 100%;
+}
+
+body {
+    margin: 0;
+    font-family: system-ui, -apple-system, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+}
+
+a {
+    color: inherit;
+    text-decoration: none;
+}
+
+.main {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 320px;
+    min-height: 100vh;
+    max-width: 1500px;
+    margin: auto;
+    padding: 32px;
+    gap: 28px;
+}
+
+/* CALENDARIO */
+
+.mainPane {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 24px;
+    min-width: 0;
+}
+
+#calendarTable {
+    width: 100%;
+    border-collapse: collapse;
+    table-layout: fixed;
+    height: auto;
+}
+
+.calendarBody td {
+    height: 100px;
+}
+
+#calendarTitle {
+    font-size: 1.25rem;
+    font-weight: 600;
+    letter-spacing: -0.5px;
+}
+
+#calendarTable thead tr:first-child th {
+    padding: 12px 8px 28px;
+}
+
+#prevMonthArrow,
+#nextMonthArrow {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 34px;
+    height: 34px;
+    border-radius: 8px;
+    color: var(--text-muted);
+    font-size: 1.2rem;
+    transition: background .2s;
+}
+
+#prevMonthArrow:hover,
+#nextMonthArrow:hover {
+    background: var(--bg);
+}
+
+.weekdays th {
+    color: var(--text-muted);
+    font-size: .78rem;
+    font-weight: 500;
+    padding: 12px 4px;
+    border-bottom: 1px solid var(--border);
+}
+
+.calendarBody td {
+    height: 100px;
+    padding: 12px;
+    text-align: center;
+    vertical-align: middle;
+    border: 1px solid var(--border);
+    color: var(--text);
+    font-size: .9rem;
+    cursor: pointer;
+    transition: background .15s;
+}
+
+.calendarBody td:hover {
+    background: #f7f8fa;
+}
+
+/* HOY */
+
+.calendarBody td.today {
+    color: var(--accent);
+    font-weight: 700;
+    position: relative;
+    background: transparent;
+}
+
+.calendarBody td.today {
+    background: var(--accent-soft);
+    border-radius: 8px;
+}
+
+/* EVENTOS */
+
+.calendarBody td.has-events {
+    background: transparent;
+    position: relative;
+    font-weight: 600;
+}
+
+.calendarBody td.has-events::after {
+    content: "";
+    display: block;
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: var(--accent);
+    margin: 7px auto 0;
+}
+
+/* PANEL LATERAL */
+
+.lateralPane {
+    display: flex;
+    flex-direction: column;
+    gap: 28px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 24px;
+    align-self: start;
+    min-height: 0;
+}
+
+.lateralPane h2 {
+    font-size: 1rem;
+    font-weight: 600;
+    margin: 0 0 20px;
+}
+
+/* FORMULARIO */
+
+#addEventForm {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    width: 100%;
+}
+
+#addEventForm label {
+    font-size: .8rem;
+    font-weight: 500;
+    color: var(--text-muted);
+    margin-top: 6px;
+}
+
+#addEventForm input[type="text"],
+#addEventForm input[type="date"] {
+    width: 100%;
+    padding: 12px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text);
+    font: inherit;
+    font-size: .9rem;
+    transition: border .2s, background .2s;
+}
+
+#addEventForm input:focus {
+    outline: none;
+    border-color: var(--accent);
+    background: white;
+}
+
+#addEventForm input[type="submit"] {
+    margin-top: 12px;
+    padding: 12px;
+    border: none;
+    border-radius: 8px;
+    background: var(--accent);
+    color: white;
+    font: inherit;
+    font-size: .9rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background .2s;
+}
+
+#addEventForm input[type="submit"]:hover {
+    background: #385ca9;
+}
+
+/* EVENTOS DEL DÍA */
+
+.day-view {
+    border-top: 1px solid var(--border);
+    padding-top: 22px;
+    margin-top: 0;
+}
+
+.day-view h3 {
+    font-size: .9rem;
+    font-weight: 600;
+    margin: 0 0 14px;
+    color: var(--text);
+}
+
+#recordsList {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+
+#recordsList li {
+    min-height: 55px;
+    padding: 12px 0;
+    border-bottom: 1px solid var(--border);
+    font-size: .88rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+}
+
+#recordsList li.empty {
+    color: var(--text-muted);
+    font-size: .85rem;
+    border: none;
+    font-style: normal;
+}
+
+.record-actions {
+    display: none;
+    gap: 6px;
+    flex-shrink: 0;
+}
+
+.record-actions button {
+    font: inherit;
+    font-size: .78rem;
+    padding: 5px 10px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: white;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: background .15s, color .15s;
+}
+
+.record-actions button:hover {
+    background: var(--bg);
+    color: var(--text);
+}
+
+#recordsList li:hover .record-actions {
+    display: inline-flex;
+}
+
+.todayButton {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 8px 14px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text);
+    font-size: .85rem;
+    font-weight: 500;
+    background: white;
+    transition: background .2s, border .2s;
+}
+
+.todayButton:hover {
+    background: var(--accent-soft);
+    border-color: #dce5fc;
+}
+
+/* MODALES */
+
+dialog {
+    border: none;
+    border-radius: 14px;
+    padding: 24px;
+    width: min(400px, 90vw);
+    box-shadow: 0 10px 40px rgba(0, 0, 0, .15);
+}
+
+dialog::backdrop {
+    background: rgba(20, 22, 28, .45);
+}
+
+dialog h3 {
+    margin: 0 0 16px;
+    font-size: 1rem;
+    font-weight: 600;
+}
+
+dialog p {
+    font-size: .9rem;
+    margin: 0;
+}
+
+dialog label {
+    display: block;
+    font-size: .8rem;
+    font-weight: 500;
+    color: var(--text-muted);
+}
+
+dialog input[type="text"] {
+    width: 100%;
+    padding: 12px;
+    margin-top: 6px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text);
+    font: inherit;
+    font-size: .9rem;
+}
+
+dialog input[type="text"]:focus {
+    outline: none;
+    border-color: var(--accent);
+}
+
+.dialog-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    margin-top: 20px;
+}
+
+.dialog-actions button {
+    font: inherit;
+    font-size: .85rem;
+    padding: 10px 16px;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: background .2s;
+}
+
+.dialog-actions button[type="button"] {
+    border: 1px solid var(--border);
+    background: white;
+    color: var(--text);
+}
+
+.dialog-actions button[type="button"]:hover {
+    background: var(--bg);
+}
+
+.dialog-actions button[type="submit"] {
+    border: none;
+    background: var(--accent);
+    color: white;
+    font-weight: 500;
+}
+
+.dialog-actions button[type="submit"]:hover {
+    background: #385ca9;
+}
+
+#deleteDialog button[type="submit"] {
+    background: #d64545;
+}
+
+#deleteDialog button[type="submit"]:hover {
+    background: #b93a3a;
+}
+
+/* RESPONSIVE */
+
+@media (max-width: 768px) {
+    .main {
+        grid-template-columns: 1fr;
+        padding: 12px;
+        gap: 16px;
+    }
+
+    .mainPane {
+        padding: 12px;
+    }
+
+    .lateralPane {
+        padding: 20px;
+    }
+
+    .calendarBody td {
+        height: 65px;
+        padding: 6px 2px;
+        font-size: .8rem;
+    }
+
+    #calendarTable thead tr:first-child th {
+        padding: 8px 4px 20px;
+    }
+
+    .record-actions {
+        display: inline-flex;
+    }
+}

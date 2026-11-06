@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="es">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width" />
+        <link rel="stylesheet" href="styles/main.css">
+        <script src="scripts/main.js" defer></script>
+    </head>
+    <body>
+        <div class="main">
+        <section class="mainPane">
+
+            <table id="calendarTable">
+                <thead>
+                    <tr>
+                        <th><a href="#" id="prevMonthArrow">&larr;</a></th>
+                        <th colspan="5" id="calendarTitle"></th>
+                        <th><a href="#" id="nextMonthArrow">&rarr;</a></th>
+                    </tr>
+                    <tr class="weekdays">
+                        <th>Dom</th>
+                        <th>Lun</th>
+                        <th>Mar</th>
+                        <th>Mié</th>
+                        <th>Jue</th>
+                        <th>Vie</th>
+                        <th>Sáb</th>
+                    </tr>
+                </thead>
+                <tbody class="calendarBody">
+                </tbody>
+            </table>
+        </section>
+
+        <aside class="lateralPane">
+            <section>
+            <h2>Registar evento</h2>
+            <form action="calendar.php" method="POST" id="addEventForm">
+                <input type="hidden" name="action" value="add">
+                <input type="hidden" name="epoch" id="epochField">
+
+                <label for="recordField">Nombre</label>
+                <input type="text" name="record" id="recordField" required>
+
+                <label for="dateField">Fecha</label>
+                <input type="date" id="dateField" required>
+
+                <input type="submit" value="Registrar">
+            </form>
+            </section>
+
+            <footer class="day-view">
+                <h3 id="selectedDayLabel"></h3>
+                <ul id="recordsList"></ul>
+            </footer>
+            <a href="/" class="todayButton">Hoy</a>
+        </aside>
+        </div>
+
+        <dialog id="editDialog">
+            <form action="calendar.php" method="POST">
+                <h3>Editar evento</h3>
+                <input type="hidden" name="action" value="update">
+                <input type="hidden" name="epoch" id="editEpochField">
+                <input type="hidden" name="recordIdx" id="editRecordIdxField">
+
+                <label for="editEventField">Nombre</label>
+                <input type="text" name="event" id="editEventField" required>
+
+                <div class="dialog-actions">
+                    <button type="button" id="editCancelBtn">Cancelar</button>
+                    <button type="submit">Guardar</button>
+                </div>
+            </form>
+        </dialog>
+
+        <dialog id="deleteDialog">
+            <form action="calendar.php" method="POST">
+                <h3>Borrar evento</h3>
+                <input type="hidden" name="action" value="remove">
+                <input type="hidden" name="epoch" id="deleteEpochField">
+                <input type="hidden" name="recordIdx" id="deleteRecordIdxField">
+
+                <p>¿Borrar <strong id="deleteEventLabel"></strong>?</p>
+
+                <div class="dialog-actions">
+                    <button type="button" id="deleteCancelBtn">Cancelar</button>
+                    <button type="submit">Borrar</button>
+                </div>
+            </form>
+        </dialog>
+    </body>
+</html>
+
