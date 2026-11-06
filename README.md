@@ -27,7 +27,7 @@ TODO: Revisar bien el formato porque me estoy mancando seguro.
 - [x] Operaciones comunes BT (insertar, buscar, obtener rango y para no complicar con el borrado únicamente borrar el detalle (cuenta como update))
 - [x] Hacer API simplona para abstraer el TAD
 - [X] Digievolución de BT a BST
-- [ ] Hacer una clase de calendario que maneje el CRUD
-- [ ] Endpoints CRUD
-- [ ] Integrar con horrible HTML
+- [x] Hacer una clase de calendario que maneje el CRUD
+- [x] Endpoints CRUD
+- [x] Integrar con horrible HTML
 - [x] Considerar si se cae a pedazos implementar una leve capa de cache: (clave, offset, izq, der)
