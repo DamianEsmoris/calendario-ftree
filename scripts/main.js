@@ -52,7 +52,7 @@ function getMonthBounds() {
     const first = new Date(year, month, 1, 0, 0 ,0);
     const last = new Date(first);
     last.setMonth(last.getMonth()+1);
-    last.setDate(-1);
+    last.setDate(0);
     return [first, last];
 }
 
